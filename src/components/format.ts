@@ -6,6 +6,8 @@ export interface DeskMode {
   paypal: "live" | "simulator";
   ai: "claude" | "rules";
   model: string | null;
+  /** Whether the built-in sample cases (simulator) are available. */
+  sample_cases: boolean;
   webhook_verified: boolean;
   /** AI analyses used today against the daily ceiling. A limit of zero means unlimited. */
   ai_usage: { used: number; limit: number };

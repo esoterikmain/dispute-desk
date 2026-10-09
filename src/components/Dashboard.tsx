@@ -174,7 +174,11 @@ export default function Dashboard() {
         <div className="flex flex-wrap items-center gap-2 justify-end">
           {mode && (
             <>
-              <span className="chip" title={mode.paypal === "live" ? "Calling the PayPal sandbox REST API" : "No PayPal credentials set: using the built-in simulator"}>
+              <span className="chip" title={
+                  mode.paypal === "live"
+                    ? "Connected to the PayPal sandbox REST API. Rows tagged Sample are simulated."
+                    : "No PayPal credentials set: every case is simulated"
+                }>
                 <span className={`chip-dot ${mode.paypal === "live" ? "bg-good" : "bg-warn"}`} />
                 PayPal: {mode.paypal === "live" ? "sandbox" : "simulator"}
               </span>
@@ -242,7 +246,7 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-          {mode?.paypal === "live" ? (
+          {mode?.paypal === "live" && (
             <>
               <div className="relative">
                 <button className="btn btn-ghost btn-sm" onClick={() => setMenu(menu === "import" ? null : "import")}>
@@ -276,17 +280,21 @@ export default function Dashboard() {
                   </form>
                 )}
               </div>
-              <button className="btn btn-primary btn-sm" disabled={!!working} onClick={() => task("Syncing", () => api("/api/sync", { method: "POST" }))}>
+              <button className="btn btn-ghost btn-sm" disabled={!!working} onClick={() => task("Syncing", () => api("/api/sync", { method: "POST" }))}>
                 {working === "Syncing" ? "Syncing" : "Sync from PayPal"}
               </button>
             </>
-          ) : (
+          )}
+          {mode?.sample_cases && (
             <div className="relative">
               <button className="btn btn-primary btn-sm" disabled={!!working} onClick={() => setMenu(menu === "simulate" ? null : "simulate")}>
-                {working === "Simulating" ? "Opening dispute" : "Simulate new dispute"}
+                {working === "Simulating" ? "Opening case" : "Try a sample case"}
               </button>
               {menu === "simulate" && (
                 <div className="popover w-96 py-1.5 text-sm max-h-[70vh] overflow-y-auto">
+                  <p className="px-3.5 pt-1.5 pb-2 text-xs text-muted">
+                    A simulated buyer opens a dispute. The agent analyses it like a real one; no PayPal login needed.
+                  </p>
                   <button className="menu-item font-medium" onClick={() => task("Simulating", () => api("/api/simulate", { body: {} }))}>
                     Random case
                   </button>
@@ -303,7 +311,7 @@ export default function Dashboard() {
                         task("Resetting", () => api("/api/reset", { method: "POST" }));
                       }}
                     >
-                      Reset demo data
+                      Reset sample cases
                     </button>
                   </div>
                 </div>

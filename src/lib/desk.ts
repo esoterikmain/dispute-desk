@@ -1,7 +1,7 @@
 import { evidenceScore, gatherCase } from "./agent/casefile";
 import { claudeVerdict, hasClaude } from "./agent/claude";
 import { rulesVerdict } from "./agent/rules";
-import { paypal } from "./paypal";
+import { gatewayFor, paypal } from "./paypal";
 import { evidencePdf } from "./pdf";
 import {
   audit,
@@ -49,7 +49,11 @@ function outcomeOf(doc: PayPalDispute, decision: Recommendation | null): Outcome
 }
 
 /** Upsert one PayPal dispute document. New open disputes are queued for analysis. */
-export async function ingestDispute(doc: PayPalDispute, source: string): Promise<{ isNew: boolean }> {
+export async function ingestDispute(
+  doc: PayPalDispute,
+  source: string,
+  origin: DisputeRow["source"],
+): Promise<{ isNew: boolean }> {
   const existing = await getDispute(doc.dispute_id);
   const tx = doc.disputed_transactions?.[0];
 
@@ -68,7 +72,7 @@ export async function ingestDispute(doc: PayPalDispute, source: string): Promise
   const order =
     (tx?.custom ? await getOrder(tx.custom) : null) ??
     (tx?.seller_transaction_id ? await getOrderByCapture(tx.seller_transaction_id) : null);
-  const row = toRow(doc, order);
+  const row = toRow(doc, order, origin);
   await insertDispute(row);
   await audit(doc.dispute_id, "paypal", "dispute_received", { source, reason: doc.reason, amount: doc.dispute_amount.value });
   if (!row.outcome) queueAnalysis(doc.dispute_id);
@@ -76,11 +80,12 @@ export async function ingestDispute(doc: PayPalDispute, source: string): Promise
 }
 
 /** Map a PayPal dispute document to a fresh, unanalysed row. */
-export function toRow(doc: PayPalDispute, order: StoreOrder | null): DisputeRow {
+export function toRow(doc: PayPalDispute, order: StoreOrder | null, origin: DisputeRow["source"]): DisputeRow {
   const tx = doc.disputed_transactions?.[0];
   const outcome = outcomeOf(doc, null);
   return {
     id: doc.dispute_id,
+    source: origin,
     status: doc.status,
     reason: doc.reason,
     stage: doc.dispute_life_cycle_stage ?? null,
@@ -107,9 +112,10 @@ export function toRow(doc: PayPalDispute, order: StoreOrder | null): DisputeRow 
   };
 }
 
-/** Pull every dispute from PayPal. The safety net behind webhooks. */
+/** Pull every dispute from PayPal. The safety net behind webhooks. Sample cases never need it. */
 export async function syncFromPayPal(caseId?: string): Promise<{ total: number; added: number }> {
   const gateway = paypal();
+  const origin = gateway.mode === "live" ? "paypal" : "simulator";
   const summaries = await gateway.listDisputes();
   const seen = new Set<string>();
   let added = 0;
@@ -119,22 +125,25 @@ export async function syncFromPayPal(caseId?: string): Promise<{ total: number; 
     if (existing && existing.updated_at === summary.update_time) continue;
     // The list endpoint returns summaries; buyer and transaction details need the full document.
     const full = gateway.mode === "live" ? await gateway.getDispute(summary.dispute_id) : summary;
-    if ((await ingestDispute(full, "sync")).isNew) added++;
+    if ((await ingestDispute(full, "sync", origin)).isNew) added++;
   }
   if (gateway.mode === "live") {
     // The sandbox list endpoint has been seen to return nothing for a dispute that exists
     // and can be fetched by ID. So open cases we already know, and a case ID the merchant
     // types in, are fetched directly.
-    const known = (await listDisputes()).filter((d) => !d.outcome && !seen.has(d.id)).map((d) => d.id);
+    const known = (await listDisputes())
+      .filter((d) => d.source === "paypal" && !d.outcome && !seen.has(d.id))
+      .map((d) => d.id);
     for (const id of new Set([...(caseId ? [caseId] : []), ...known])) {
-      if ((await ingestDispute(await gateway.getDispute(id), caseId === id ? "import" : "sync")).isNew) added++;
+      if ((await ingestDispute(await gateway.getDispute(id), caseId === id ? "import" : "sync", "paypal")).isNew) added++;
     }
   }
   return { total: summaries.length, added };
 }
 
 export async function refreshDispute(id: string): Promise<void> {
-  await ingestDispute(await paypal().getDispute(id), "refresh");
+  const gateway = await gatewayFor(id);
+  await ingestDispute(await gateway.getDispute(id), "refresh", gateway.mode === "live" ? "paypal" : "simulator");
 }
 
 // --- analysis queue -------------------------------------------------------------
@@ -252,14 +261,14 @@ export interface ActInput {
 /** Carry out a decision on PayPal and record it. */
 export async function act(id: string, input: ActInput): Promise<void> {
   // The actions PayPal allows on a case change over time, so decide from a fresh copy.
-  if (paypal().mode === "live") await refreshDispute(id);
+  const gateway = await gatewayFor(id);
+  if (gateway.mode === "live") await refreshDispute(id);
   const dispute = await getDispute(id);
   if (!dispute) throw new Error(`Dispute ${id} not found`);
   if (dispute.decision) throw new Error(`Dispute ${id} was already actioned (${dispute.decision})`);
   if (dispute.outcome) throw new Error(`Dispute ${id} is already resolved`);
 
   const letter = (input.letter ?? dispute.verdict?.response_letter ?? "").trim();
-  const gateway = paypal();
   if (gateway.mode === "live") {
     // PayPal lists the actions it will accept right now. Refuse early, in plain words.
     const allowed = new Set((dispute.raw.links ?? []).map((l) => l.rel));
@@ -318,8 +327,9 @@ export async function forceOutcome(id: string, outcome: "SELLER_FAVOR" | "BUYER_
   if ((await listAudit(id)).some((a) => a.action === "sandbox_adjudicated")) {
     throw new Error("A ruling was already sent for this case. PayPal takes a couple of minutes to close it.");
   }
+  const gateway = await gatewayFor(id);
   try {
-    await paypal().adjudicate(id, outcome);
+    await gateway.adjudicate(id, outcome);
   } catch (err) {
     if (err instanceof Error && err.message.includes("ACTION_NOT_ALLOWED_IN_CURRENT_DISPUTE_STATE")) {
       // Seen in testing: the sandbox enabled adjudicate 10 and 15 minutes after the seller's response was filed.
@@ -329,7 +339,7 @@ export async function forceOutcome(id: string, outcome: "SELLER_FAVOR" | "BUYER_
   }
   await audit(id, "system", "sandbox_adjudicated", { outcome });
   await refreshDispute(id);
-  if (paypal().mode === "live") {
+  if (gateway.mode === "live") {
     // PayPal closes the case a minute or two after accepting the ruling; pick that up without a manual sync.
     for (const delay of [45_000, 90_000, 150_000, 240_000]) {
       setTimeout(() => refreshDispute(id).catch((err) => console.error(`[desk] refresh of ${id} failed`, err)), delay);

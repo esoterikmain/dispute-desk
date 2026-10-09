@@ -9,9 +9,9 @@ import { rulesVerdict } from "@/lib/agent/rules";
 import { act, analyzeDispute, forceOutcome } from "@/lib/desk";
 import { keywordQuery } from "@/lib/nlfilter";
 import { evidencePdf } from "@/lib/pdf";
-import { getDispute, getOrder, listAudit, saveSettings } from "@/lib/repo";
+import { getDispute, getOrder, insertDispute, listAudit, listDisputes, saveSettings } from "@/lib/repo";
 import { SCENARIOS } from "@/lib/scenarios";
-import { simulateDispute } from "@/lib/seed";
+import { resetDemo, simulateDispute } from "@/lib/seed";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import { takeAllowance, usageToday } from "@/lib/usage";
 
@@ -104,6 +104,21 @@ describe("autopilot", () => {
     expect((await getDispute(small))!.outcome).toBe("REFUNDED");
     expect((await getDispute(large))!.decision).toBeNull();
     await saveSettings(DEFAULT_SETTINGS);
+  });
+});
+
+describe("sample cases next to real PayPal cases", () => {
+  it("resetting the samples keeps cases that came from PayPal", async () => {
+    const sampleId = await simulateDispute("inr-no-tracking");
+    const sample = await settled(sampleId);
+    expect(sample.source).toBe("simulator");
+    await insertDispute({ ...sample, id: "PP-R-REAL-1", source: "paypal" });
+
+    await resetDemo();
+
+    expect(await getDispute(sampleId)).toBeNull();
+    expect((await getDispute("PP-R-REAL-1"))?.source).toBe("paypal");
+    expect((await listDisputes()).filter((d) => d.source === "simulator").length).toBeGreaterThan(10);
   });
 });
 

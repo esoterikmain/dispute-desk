@@ -16,6 +16,6 @@ export const POST = (req: Request) =>
 
     // The body only tells us which dispute changed. The dispute itself is re-read from
     // PayPal with our own credentials, so a forged event cannot plant data.
-    const result = await ingestDispute(await paypal().getDispute(disputeId), `webhook:${event.event_type}`);
+    const result = await ingestDispute(await paypal().getDispute(disputeId), `webhook:${event.event_type}`, "paypal");
     return { ok: true, ...result };
   });

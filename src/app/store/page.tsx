@@ -165,9 +165,9 @@ export default function Store() {
                     {dateTime(o.placed_at)} &middot;{" "}
                     {o.shipment ? (o.shipment.delivered_at ? `Delivered${o.shipment.signed_by ? ", signed" : ""}` : "In transit") : "No tracking"}
                   </div>
-                  {data && !data.paypalClientId && (
+                  {(o.capture_id.startsWith("CAP-") || o.capture_id.startsWith("SIMCAP-")) && (
                     <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                      <span className="text-xs text-muted">Open a dispute as the buyer:</span>
+                      <span className="text-xs text-muted">Simulated order. Open a dispute as the buyer:</span>
                       {CLAIMS.map(([reason, label]) => (
                         <button key={reason} className="chip hover:border-accent hover:text-accent" onClick={() => dispute(o.id, reason)}>
                           {label}

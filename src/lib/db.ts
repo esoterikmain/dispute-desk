@@ -12,6 +12,7 @@ export interface Db {
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS disputes (
   id text PRIMARY KEY,
+  source text NOT NULL DEFAULT 'paypal',
   status text NOT NULL,
   reason text NOT NULL,
   stage text,
@@ -68,6 +69,12 @@ CREATE TABLE IF NOT EXISTS sim_disputes (
 );
 `;
 
+// Idempotent upgrades for databases created by earlier versions.
+const MIGRATIONS = `
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'paypal';
+UPDATE disputes SET source = 'simulator' WHERE source <> 'simulator' AND id IN (SELECT id FROM sim_disputes);
+`;
+
 async function open(): Promise<Db> {
   let db: Db;
   if (process.env.DATABASE_URL) {
@@ -96,6 +103,7 @@ async function open(): Promise<Db> {
     };
   }
   await db.exec(SCHEMA);
+  await db.exec(MIGRATIONS);
   return db;
 }
 

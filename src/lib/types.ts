@@ -94,6 +94,8 @@ export interface Verdict {
 
 export interface DisputeRow {
   id: string;
+  /** Where the case lives: the real PayPal API, or the built-in simulator (sample cases). */
+  source: "paypal" | "simulator";
   status: string;
   reason: string;
   stage: string | null;

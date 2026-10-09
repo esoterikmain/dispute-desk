@@ -119,7 +119,10 @@ export default function DisputeDrawer({ row, mode, onClose, onChanged, onError }
     <aside className="drawer" aria-label={`Dispute ${row.id}`}>
       <header className="flex items-start justify-between gap-4 px-6 pt-5 pb-4 border-b border-line">
         <div className="min-w-0">
-          <div className="text-xs font-mono text-muted">{row.id}</div>
+          <div className="text-xs font-mono text-muted">
+            {row.id}
+            <span className="tag ml-2">{row.source === "paypal" ? "PayPal sandbox" : "Sample case"}</span>
+          </div>
           <h2 className="text-lg font-semibold mt-0.5">
             {REASON_LABELS[row.reason] ?? row.reason} &middot; {money(row.amount, row.currency)}
           </h2>
@@ -293,7 +296,7 @@ export default function DisputeDrawer({ row, mode, onClose, onChanged, onError }
               <div className="mt-3 pt-3 border-t border-line">
                 <div className="text-xs text-muted mb-2">
                   Sandbox test control. PayPal normally takes days to rule; this forces the ruling now
-                  {mode.paypal === "live"
+                  {row.source === "paypal"
                     ? " through the sandbox adjudicate endpoint. PayPal accepts it 10 to 15 minutes after your response is filed, and takes a couple of minutes to close the case."
                     : " in the simulator."}
                 </div>

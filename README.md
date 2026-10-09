@@ -25,11 +25,14 @@ To switch on the real integrations, copy `.env.example` to `.env.local` and fill
 | `AI_DAILY_ANALYSES`, `AI_DAILY_FILTERS` | Daily ceilings on Claude calls (default 100 and 300, `0` = unlimited). Past the ceiling the app falls back to the rules engine and says so. |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Calls the PayPal sandbox REST API instead of the simulator. |
 | `PAYPAL_WEBHOOK_ID` | Verifies webhook signatures. |
+| `DEMO_DATA` | Set to `off` to hide the sample cases when PayPal is connected. By default they stay available. |
 | `DATABASE_URL` | Uses Postgres instead of the embedded PGlite database in `./.data`. |
 
-## Try it in two minutes (simulator)
+When PayPal credentials are set, the sample cases stay available next to the real ones. Each case belongs either to the real PayPal API or to the simulator, rows from the simulator are tagged **Sample**, and actions on a sample case never reach PayPal. This lets a visitor try the whole product without a PayPal login while real sandbox cases flow in through Sync and webhooks.
 
-1. Press **Simulate new dispute** and pick a case. A row appears and fills in as the agent works.
+## Try it in two minutes (sample cases)
+
+1. Press **Try a sample case** and pick one. A row appears and fills in as the agent works.
 2. Click the row. The drawer shows the win chance, the evidence for and against, the drafted response, the order record and the audit trail.
 3. Press **Submit evidence** (or **Approve** in the grid). Tick several rows to approve them together.
 4. In the drawer, use the sandbox control **Rule for seller** to close the case and watch the money move to "kept".
@@ -53,7 +56,7 @@ PayPal webhook / sync ──> ingest ──> analysis queue ──> agent ──
                           PayPal Disputes API <── act <── merchant approval / autopilot
 ```
 
-- **PayPal** (`src/lib/paypal`). One gateway interface with two implementations: `live.ts` calls the REST API, `simulator.ts` keeps dispute documents in the local database in PayPal's own JSON shape. Everything above the gateway is the same code in both modes.
+- **PayPal** (`src/lib/paypal`). One gateway interface with two implementations: `live.ts` calls the REST API, `simulator.ts` keeps dispute documents in the local database in PayPal's own JSON shape. The gateway is chosen per case, and everything above it is the same code for both.
   - Disputes: list, show details, provide evidence (with a generated PDF packet), accept claim, make offer, send message, sandbox adjudicate.
   - Orders v2: create, capture and add tracking, for the demo store checkout (PayPal JavaScript SDK buttons).
   - Webhooks: signature verification. The handler only takes the dispute ID from the event and re-reads the dispute from PayPal, so a forged event cannot plant data.
@@ -69,7 +72,7 @@ PayPal webhook / sync ──> ingest ──> analysis queue ──> agent ──
 ## Checks
 
 ```bash
-npm test          # 20 tests: every scenario, the full dispute lifecycle on the simulator, autopilot, PDF
+npm test          # 23 tests: every scenario, the full dispute lifecycle on the simulator, autopilot, PDF
 npm run eval      # runs the 12 labelled scenarios through Claude and the rules baseline (needs ANTHROPIC_API_KEY)
 npm run typecheck
 npm run lint

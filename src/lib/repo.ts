@@ -38,16 +38,16 @@ export async function updateDispute(id: string, patch: Partial<DisputeRow>): Pro
 export async function insertDispute(row: DisputeRow): Promise<void> {
   const db = await getDb();
   await db.query(
-    `INSERT INTO disputes (id, status, reason, stage, amount, currency, buyer_name, buyer_email,
+    `INSERT INTO disputes (source, id, status, reason, stage, amount, currency, buyer_name, buyer_email,
        transaction_id, order_id, created_at, updated_at, response_due, outcome, resolved_at,
        agent_status, agent_step, engine, verdict, evidence_score, decision, decided_by, submitted_at, raw)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24::jsonb)`,
+     VALUES ($25,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24::jsonb)`,
     [
       row.id, row.status, row.reason, row.stage, row.amount, row.currency, row.buyer_name, row.buyer_email,
       row.transaction_id, row.order_id, row.created_at, row.updated_at, row.response_due, row.outcome,
       row.resolved_at, row.agent_status, row.agent_step, row.engine,
       row.verdict ? JSON.stringify(row.verdict) : null, row.evidence_score, row.decision, row.decided_by,
-      row.submitted_at, JSON.stringify(row.raw),
+      row.submitted_at, JSON.stringify(row.raw), row.source,
     ],
   );
 }
@@ -124,7 +124,13 @@ export async function saveSettings(settings: Settings): Promise<void> {
   );
 }
 
-export async function wipeAll(): Promise<void> {
+/** Remove the sample cases and their orders. Cases that came from the real PayPal API are kept. */
+export async function wipeSamples(): Promise<void> {
   const db = await getDb();
-  await db.exec("DELETE FROM disputes; DELETE FROM orders; DELETE FROM audit_log; DELETE FROM sim_disputes;");
+  await db.exec(`
+    DELETE FROM audit_log WHERE dispute_id IN (SELECT id FROM disputes WHERE source = 'simulator');
+    DELETE FROM disputes WHERE source = 'simulator';
+    DELETE FROM orders WHERE capture_id LIKE 'CAP-%' OR capture_id LIKE 'SIMCAP-%';
+    DELETE FROM sim_disputes;
+  `);
 }

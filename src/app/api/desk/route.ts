@@ -1,7 +1,7 @@
 import { MODEL, hasClaude } from "@/lib/agent/claude";
 import { deskSnapshot } from "@/lib/desk";
 import { handle } from "@/lib/http";
-import { isLivePayPal } from "@/lib/paypal";
+import { isLivePayPal, sampleCasesEnabled } from "@/lib/paypal";
 import { getSettings } from "@/lib/repo";
 import { ensureSeeded } from "@/lib/seed";
 import { usageToday } from "@/lib/usage";
@@ -18,6 +18,7 @@ export const GET = () =>
         paypal: isLivePayPal() ? "live" : "simulator",
         ai: hasClaude() ? "claude" : "rules",
         model: hasClaude() ? MODEL : null,
+        sample_cases: sampleCasesEnabled(),
         webhook_verified: !!process.env.PAYPAL_WEBHOOK_ID,
         ai_usage: await usageToday("analysis"),
       },

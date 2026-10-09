@@ -1,25 +1,24 @@
 import { randomBytes } from "node:crypto";
 import { evidenceScore, gatherCase } from "./agent/casefile";
-import { getDb } from "./db";
 import { rulesVerdict } from "./agent/rules";
 import { ingestDispute, toRow } from "./desk";
-import { isLivePayPal } from "./paypal";
+import { sampleCasesEnabled } from "./paypal";
 import { simPutDispute } from "./paypal/simulator";
-import { audit, getOrder, insertDispute, listDisputes, saveOrder, updateDispute, wipeAll } from "./repo";
+import { audit, getOrder, insertDispute, listDisputes, saveOrder, updateDispute, wipeSamples } from "./repo";
 import { SCENARIOS, SCENARIO_BY_KEY, buildCase, type Scenario } from "./scenarios";
 import type { Outcome, PayPalDispute, Recommendation } from "./types";
 
 const suffix = () => randomBytes(4).toString("hex").toUpperCase();
 const DAY = 86_400_000;
 
-/** Simulator only: a buyer opens a dispute. Returns the new dispute ID. */
+/** A buyer opens a sample dispute in the simulator. Returns the new dispute ID. */
 export async function simulateDispute(key?: string, openedDaysAgo = 0): Promise<string> {
   const scenario = (key && SCENARIO_BY_KEY.get(key)) || SCENARIOS[Math.floor(Math.random() * SCENARIOS.length)];
   const built = buildCase(scenario, suffix(), openedDaysAgo);
   for (const order of [built.order, ...built.history]) await saveOrder(order);
   await simPutDispute(built.dispute);
   // Same entry point a PayPal webhook uses.
-  await ingestDispute(built.dispute, "simulator");
+  await ingestDispute(built.dispute, "simulator", "simulator");
   return built.dispute.dispute_id;
 }
 
@@ -27,7 +26,7 @@ export async function simulateDispute(key?: string, openedDaysAgo = 0): Promise<
 export async function simulateDisputeForEval(key: string): Promise<string> {
   const built = buildCase(SCENARIO_BY_KEY.get(key)!, suffix());
   for (const order of [built.order, ...built.history]) await saveOrder(order);
-  await insertDispute(toRow(built.dispute, built.order));
+  await insertDispute(toRow(built.dispute, built.order, "simulator"));
   return built.dispute.dispute_id;
 }
 
@@ -37,7 +36,7 @@ const CLAIM_TEXT: Record<string, string> = {
   UNAUTHORISED: "I did not authorise this payment.",
 };
 
-/** Simulator only: the buyer of a demo-store order opens a dispute on it. */
+/** The buyer of a simulated demo-store order opens a sample dispute on it. */
 export async function simulateDisputeForOrder(orderId: string, reason: string): Promise<string> {
   const order = await getOrder(orderId);
   if (!order?.capture_id) throw new Error("Order not found or not paid");
@@ -58,7 +57,7 @@ export async function simulateDisputeForOrder(orderId: string, reason: string): 
     messages: [{ posted_by: "BUYER", time_posted: opened, content: CLAIM_TEXT[reason] }],
   };
   await simPutDispute(doc);
-  await ingestDispute(doc, "simulator");
+  await ingestDispute(doc, "simulator", "simulator");
   return doc.dispute_id;
 }
 
@@ -109,7 +108,7 @@ async function seedResolved(scenario: Scenario, openedDaysAgo: number, outcome: 
   };
   await simPutDispute(doc);
 
-  const row = toRow(built.dispute, built.order);
+  const row = toRow(built.dispute, built.order, "simulator");
   await insertDispute(row);
   const caseFile = await gatherCase(row);
   await updateDispute(row.id, {
@@ -129,43 +128,34 @@ async function seedResolved(scenario: Scenario, openedDaysAgo: number, outcome: 
   await audit(row.id, "system", "seeded_history", { outcome });
 }
 
-const g = globalThis as unknown as { __deskSeeding?: Promise<void>; __deskPurging?: Promise<void> };
+const g = globalThis as unknown as { __deskSeeding?: Promise<void> };
+
+/** A paid order made in the simulator, as opposed to a real PayPal sandbox payment. */
+export const isSampleOrder = (captureId: string) => captureId.startsWith("CAP-") || captureId.startsWith("SIMCAP-");
 
 /**
- * Once real PayPal credentials are configured, simulator-made records must go: their
- * dispute IDs do not exist at PayPal, so acting on them would only produce errors.
+ * Make sure the sample cases exist: resolved history plus open disputes. They sit next to
+ * any real PayPal cases, so a visitor can try the whole product without a PayPal login.
  */
-async function purgeSimulatorData(): Promise<void> {
-  const db = await getDb();
-  await db.exec(`
-    DELETE FROM audit_log WHERE dispute_id IN (SELECT id FROM sim_disputes);
-    DELETE FROM disputes WHERE id IN (SELECT id FROM sim_disputes);
-    DELETE FROM orders WHERE capture_id LIKE 'CAP-%' OR capture_id LIKE 'SIMCAP-%';
-    DELETE FROM sim_disputes;
-  `);
-}
-
-/** Fill an empty simulator with a believable store: resolved history plus open disputes. */
 export function ensureSeeded(): Promise<void> {
-  if (isLivePayPal()) {
-    return (g.__deskPurging ??= purgeSimulatorData().catch((err) => {
-      g.__deskPurging = undefined;
-      throw err;
-    }));
-  }
+  if (!sampleCasesEnabled()) return Promise.resolve();
   return (g.__deskSeeding ??= (async () => {
-    if ((await listDisputes()).length > 0) return;
+    if ((await listDisputes()).some((d) => d.source === "simulator")) return;
     for (const [key, days, outcome, buyer] of HISTORY_SEED) {
       await seedResolved(SCENARIO_BY_KEY.get(key)!, days, outcome, buyer);
     }
     for (const [key, days] of OPEN_SEED) await simulateDispute(key, days);
-  })());
+  })().catch((err) => {
+    g.__deskSeeding = undefined;
+    throw err;
+  }));
 }
 
+/** Rebuild the sample cases. Real PayPal cases are left alone. */
 export async function resetDemo(): Promise<void> {
-  if (isLivePayPal()) throw new Error("Reset is only available in simulator mode");
+  if (!sampleCasesEnabled()) throw new Error("Sample cases are switched off (DEMO_DATA=off)");
   await g.__deskSeeding?.catch(() => {});
-  await wipeAll();
+  await wipeSamples();
   g.__deskSeeding = undefined;
   await ensureSeeded();
 }

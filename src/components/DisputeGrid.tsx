@@ -37,7 +37,14 @@ function CaseCell({ data }: Cell) {
   return (
     <div className="flex flex-col justify-center leading-tight h-full">
       <span className="font-medium text-ink truncate">{data.buyer_name ?? "Unknown buyer"}</span>
-      <span className="font-mono text-[11px] text-muted truncate">{data.id}</span>
+      <span className="flex items-center gap-1.5 min-w-0">
+        <span className="font-mono text-[11px] text-muted truncate">{data.id}</span>
+        {data.source === "simulator" && (
+          <span className="tag" title="Simulated case, not a real PayPal dispute">
+            Sample
+          </span>
+        )}
+      </span>
     </div>
   );
 }
