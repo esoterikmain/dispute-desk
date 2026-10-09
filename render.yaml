@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: dispute-desk
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 24
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dispute-desk-db
+          property: connectionString
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: AI_DAILY_ANALYSES
+        value: 100
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+
+databases:
+  - name: dispute-desk-db
+    plan: free
